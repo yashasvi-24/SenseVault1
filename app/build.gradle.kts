@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.example.sensevault"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.sensevault"
