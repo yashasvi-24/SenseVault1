@@ -3,17 +3,19 @@ name: Build SenseVault APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout source code
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -23,17 +25,22 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-37 build-tools;37.0.0'
 
-      - name: Install Android platform
-        run: sdkmanager "platforms;android-37"
-
-      - name: Set up Gradle
+      - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
 
-      - name: Build APK
+      - name: Check project files
+        run: |
+          echo "Checking project structure..."
+          ls -la
+          ls -la app
+
+      - name: Build SenseVault Debug APK
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Upload APK
@@ -41,4 +48,5 @@ jobs:
         with:
           name: SenseVault-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
           retention-days: 14
