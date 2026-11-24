@@ -14,11 +14,18 @@ import com.example.sensevault.data.SensorSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.ConcurrentHashMap
+import java.util.IdentityHashMap
 
 /** Records only readings received during the current monitoring session. */
 class SensorMonitor(context: Context) : SensorEventListener {
     private val manager = context.applicationContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val allSensors = manager.getSensorList(Sensor.TYPE_ALL)
+
+    // Do not key readings by Sensor.id: some device HALs report duplicate/default IDs.
+    // Assign each discovered Sensor object its own stable index for this monitor instance.
+    private val sensorIndexes = IdentityHashMap<Sensor, Int>().apply {
+        allSensors.forEachIndexed { index, sensor -> put(sensor, index) }
+    }
     private val latestValues = ConcurrentHashMap<Int, SensorSample>()
     private val samples = mutableListOf<SensorSample>()
     private var startedAtWallClock = 0L
@@ -104,6 +111,8 @@ class SensorMonitor(context: Context) : SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private fun record(sensor: Sensor, values: FloatArray, timestampNanos: Long, accuracy: Int) {
+        val index = sensorIndex(sensor)
+        if (index < 0) return
         val sample = SensorSample(
             sensorId = sensor.id,
             sensorName = sensor.name,
@@ -113,7 +122,7 @@ class SensorMonitor(context: Context) : SensorEventListener {
             values = values.toList(),
             accuracy = accuracy
         )
-        latestValues[sensor.id] = sample
+        latestValues[index] = sample
         synchronized(samples) {
             // Bound memory usage during very long sessions; retain the most recent 30,000 samples.
             if (samples.size >= MAX_SAMPLES) samples.removeAt(0)
@@ -123,8 +132,20 @@ class SensorMonitor(context: Context) : SensorEventListener {
         _readings.value = makeSnapshot()
     }
 
-    private fun makeSnapshot(): List<SensorSnapshot> = allSensors.map { sensor ->
-        val sample = latestValues[sensor.id]
+    private fun sensorIndex(sensor: Sensor): Int {
+        sensorIndexes[sensor]?.let { return it }
+        // Defensive fallback in case Android supplies a different Sensor wrapper instance.
+        return allSensors.indexOfFirst {
+            it.type == sensor.type &&
+                it.name == sensor.name &&
+                it.vendor == sensor.vendor &&
+                it.version == sensor.version &&
+                it.id == sensor.id
+        }
+    }
+
+    private fun makeSnapshot(): List<SensorSnapshot> = allSensors.mapIndexed { index, sensor ->
+        val sample = latestValues[index]
         val fresh = sample != null && sample.timestampElapsedRealtimeNanos >= startedAtElapsedNanos && startedAtElapsedNanos != 0L
         SensorSnapshot(
             sensorId = sensor.id,
